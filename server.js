@@ -49,12 +49,17 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Proxy Handler
+// Proxy İşleyici (GET ve POST formları destekler)
 async function handleProxy(req, res) {
   let targetUrl = req.query.url || req.body.url;
   if (!targetUrl) return res.redirect('/');
 
-  // URL veya Arama Motoru yönlendirmesi
+  // Standart DuckDuckGo'yu iOS 9 dostu HTML sürümüne çevir
+  if (targetUrl === 'https://duckduckgo.com' || targetUrl === 'https://duckduckgo.com/' || targetUrl === 'http://duckduckgo.com') {
+    targetUrl = 'https://html.duckduckgo.com/html';
+  }
+
+  // Eğer doğrudan arama yapılmışsa (URL değilse)
   if (!/^https?:\/\//i.test(targetUrl)) {
     if (targetUrl.includes('.') && !targetUrl.includes(' ')) {
       targetUrl = 'https://' + targetUrl;
@@ -63,20 +68,58 @@ async function handleProxy(req, res) {
     }
   }
 
+  // GET formlarından gelen ek parametreleri (örn: ?q=arama&b=...) hedef URL'e ekle
+  if (req.method === 'GET') {
+    try {
+      const parsedUrl = new URL(targetUrl);
+      for (const [key, val] of Object.entries(req.query)) {
+        if (key !== 'url') {
+          parsedUrl.searchParams.set(key, val);
+        }
+      }
+      targetUrl = parsedUrl.href;
+    } catch (e) {}
+  }
+
   try {
-    const response = await axios.get(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      },
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7'
+    };
+
+    let postData = undefined;
+    if (req.method === 'POST') {
+      const params = new URLSearchParams();
+      for (const [key, val] of Object.entries(req.body)) {
+        if (key !== 'url') {
+          params.append(key, val);
+        }
+      }
+      postData = params.toString();
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    }
+
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      headers: headers,
+      data: postData,
       responseType: 'arraybuffer',
       timeout: 15000,
-      maxRedirects: 5
+      maxRedirects: 5,
+      validateStatus: () => true
     });
+
+    // Yönlendirme varsa (301, 302 vb.)
+    if (response.headers['location']) {
+      const redirectUrl = new URL(response.headers['location'], targetUrl).href;
+      return res.redirect(`/proxy?url=${encodeURIComponent(redirectUrl)}`);
+    }
 
     const contentType = response.headers['content-type'] || '';
 
-    // HTML dışındaki dosyaları (resim, font, css vb.) doğrudan ilet
+    // HTML dışındaki dosyaları doğrudan ilet
     if (!contentType.includes('text/html')) {
       res.set('Content-Type', contentType);
       return res.send(response.data);
@@ -107,7 +150,7 @@ async function handleProxy(req, res) {
       }
     });
 
-    // 3. CSS dosyalarını (link rel="stylesheet") mutlak adrese çevir
+    // 3. CSS dosyalarını mutlak adrese çevir
     $('link[rel="stylesheet"]').each((_, el) => {
       const href = $(el).attr('href');
       if (href) {
@@ -117,16 +160,19 @@ async function handleProxy(req, res) {
       }
     });
 
-    // 4. Form gönderimlerini yakala
+    // 4. Form gönderimlerini (POST ve GET) proxy'ye bağla
     $('form').each((_, el) => {
-      const action = $(el).attr('action');
+      const action = $(el).attr('action') || '';
+      const method = ($(el).attr('method') || 'GET').toUpperCase();
+      let absAction = targetUrl;
+      try {
+        absAction = new URL(action, targetUrl).href;
+      } catch (e) {}
+
       $(el).attr('action', '/proxy');
-      if (action) {
-        try {
-          const absAction = new URL(action, parsedBase.origin).href;
-          $(el).append(`<input type="hidden" name="url" value="${absAction}">`);
-        } catch (e) {}
-      }
+      $(el).attr('method', method);
+      $(el).find('input[name="url"]').remove();
+      $(el).prepend(`<input type="hidden" name="url" value="${absAction}">`);
     });
 
     // 5. iOS 9 için Gezinme Çubuğu ve CSS Düzeltmeleri
