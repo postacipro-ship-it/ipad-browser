@@ -40,7 +40,7 @@ app.get('/', (req, res) => {
             </form>
             <div class="links">
                 <a href="/proxy?url=https://tr.wikipedia.org">Wikipedia</a>
-                <a href="/proxy?url=https://html.duckduckgo.com/html">DuckDuckGo</a>
+                <a href="/proxy?url=https://lite.duckduckgo.com/lite/">DuckDuckGo Lite</a>
                 <a href="/proxy?url=https://news.ycombinator.com">Hacker News</a>
             </div>
         </div>
@@ -49,14 +49,17 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Proxy İşleyici (GET ve POST formları destekler)
+// Proxy İşleyici (GET ve POST formları tam destekler)
 async function handleProxy(req, res) {
   let targetUrl = req.query.url || req.body.url;
   if (!targetUrl) return res.redirect('/');
 
-  // Standart DuckDuckGo'yu iOS 9 dostu HTML sürümüne çevir
-  if (targetUrl === 'https://duckduckgo.com' || targetUrl === 'https://duckduckgo.com/' || targetUrl === 'http://duckduckgo.com') {
-    targetUrl = 'https://html.duckduckgo.com/html';
+  // DuckDuckGo aramalarını veri merkezi IP engelini aşan 'lite.duckduckgo.com'a yönlendir
+  if (targetUrl.includes('duckduckgo.com')) {
+    targetUrl = targetUrl
+      .replace('html.duckduckgo.com/html', 'lite.duckduckgo.com/lite/')
+      .replace('duckduckgo.com/html', 'lite.duckduckgo.com/lite/')
+      .replace(/^https?:\/\/duckduckgo\.com\/?$/i, 'https://lite.duckduckgo.com/lite/');
   }
 
   // Eğer doğrudan arama yapılmışsa (URL değilse)
@@ -64,11 +67,11 @@ async function handleProxy(req, res) {
     if (targetUrl.includes('.') && !targetUrl.includes(' ')) {
       targetUrl = 'https://' + targetUrl;
     } else {
-      targetUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(targetUrl)}`;
+      targetUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(targetUrl)}`;
     }
   }
 
-  // GET formlarından gelen ek parametreleri (örn: ?q=arama&b=...) hedef URL'e ekle
+  // GET formlarından gelen ek parametreleri (?q=...&kl=...) hedef URL'e ekle
   if (req.method === 'GET') {
     try {
       const parsedUrl = new URL(targetUrl);
@@ -119,7 +122,7 @@ async function handleProxy(req, res) {
 
     const contentType = response.headers['content-type'] || '';
 
-    // HTML dışındaki dosyaları doğrudan ilet
+    // HTML dışındaki dosyaları (resim, font, css vb.) doğrudan ilet
     if (!contentType.includes('text/html')) {
       res.set('Content-Type', contentType);
       return res.send(response.data);
